@@ -1,0 +1,325 @@
+version: "3.3"
+
+networks:
+  net:
+    driver: overlay
+    attachable: true
+
+volumes:
+    prometheus: {}
+    grafana: {}
+    alertmanager: {}
+    loki: {}
+    influxdb: {}
+    telegraf: {}
+
+configs:
+  caddy_config:
+    file: ./configs/default/caddy/Caddyfile
+  dockerd_config:
+    file: ./configs/default/dockerd-exporter/Caddyfile
+  node_rules:
+    file: ./configs/default/prometheus/rules/swarm_node.rules.yml
+  task_rules:
+    file: ./configs/default/prometheus/rules/swarm_task.rules.yml
+  alertmanager_config:
+    file: ./configs/default/alertmanager/conf/alertmanager.yml
+  grafana_dashboards:
+    file: ./configs/default/grafana/grafeus_dashboards.yml
+  grafana_datasources:
+    file: ./configs/default/grafana/datasources/datasources.yaml
+  grafana_dashboard_swarmprom-nodes-dash:
+    file: ./configs/default/grafana/dashboards/swarmprom-nodes-dash.json
+  grafana_dashboard_swarmprom-services-dash:
+    file: ./configs/default/grafana/dashboards/swarmprom-services-dash.json
+  grafana_dashboard_swarmprom-prometheus-dash:
+    file: ./configs/default/grafana/dashboards/swarmprom-prometheus-dash.json
+  loki_config:
+    file: ./configs/default/loki/conf/loki.yaml
+  prometheus_config:
+    file: ./configs/default/prometheus/conf/prometheus.yml
+  prometheus_weave_cortex:
+    file: ./configs/default/prometheus/conf/weave-cortex.yml
+  telegraf_config:
+    file: ./configs/default/telegraf/conf/telegraf.conf
+  influxdb_config:
+    file: ./configs/default/influxdb/influxdb.conf
+  
+
+services:
+  influxdb:
+    image: influxdb:1.8.3
+    volumes: 
+      - influxdb:/influxdb
+    configs:
+      - source: influxdb_config
+        target: /etc/influxdb/influxdb.conf
+    networks:
+      - net
+    environment:
+      - DOCKER_GWBRIDGE_IP=172.18.0.1
+      - INFLUXDB_DB=${INFLUXDB_DB}
+      - INFLUXDB_ADMIN_ENABLED=${INFLUXDB_ADMIN_ENABLED}
+      - INFLUXDB_ADMIN_USER=${INFLUXDB_ADMIN_USER}
+      - INFLUXDB_ADMIN_PASSWORD=${INFLUXDB_ADMIN_PASSWORD}
+      - INFLUXDB_USER=${INFLUXDB_USER}
+      - INFLUXDB_USER_PASSWORD=${INFLUXDB_USER_PASSWORD}
+      - INFLUXDB_READ_USER=${INFLUXDB_READ_USER}
+      - INFLUXDB_READ_USER_PASSWORD=${INFLUXDB_READ_USER_PASSWORD}
+      - INFLUXDB_WRITE_USER=${INFLUXDB_WRITE_USER}
+      - INFLUXDB_WRITE_USER_PASSWORD=${INFLUXDB_WRITE_USER_PASSWORD}
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  telegraf:
+    image: telegraf:alpine
+    volumes: 
+      - telegraf:/telegraf
+    networks:
+      - net
+    environment:
+      - DOCKER_GWBRIDGE_IP=172.18.0.1
+    configs:
+      - source: telegraf_config
+        target: /etc/telegraf/telegraf.conf
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  dockerd-exporter:
+    image: stefanprodan/caddy
+    networks:
+      - net
+    environment:
+      - DOCKER_GWBRIDGE_IP=172.18.0.1
+    configs:
+      - source: dockerd_config
+        target: /etc/caddy/Caddyfile
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  cadvisor:
+    image: google/cadvisor
+    networks:
+      - net
+    command: -logtostderr -docker_only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  grafana:
+    image: grafana/grafana:7.3.5
+    networks:
+      - net
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      #- GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-localhost}
+      #- GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      #- GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-grafana@test.com}
+      #- GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Grafana}
+      #- GF_SMTP_HOST=${GF_SMTP_HOST:-smtp:25}
+      #- GF_SMTP_USER=${GF_SMTP_USER}
+      #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
+    volumes:
+      - grafana:/var/lib/grafana
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/grafeus.yaml
+      - source: grafana_dashboards
+        target: /etc/grafana/provisioning/dashboards/grafeus_dashboards.yml
+      - source: grafana_dashboard_swarmprom-nodes-dash
+        target: /etc/grafana/dashboards/swarmprom-nodes-dash.json
+      - source: grafana_dashboard_swarmprom-prometheus-dash
+        target: /etc/grafana/dashboards/swarmprom-prometheus-dash.json
+      - source: grafana_dashboard_swarmprom-services-dash
+        target: /etc/grafana/dashboards/swarmprom-services-dash.json
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  alertmanager:
+    image: prom/alertmanager:v0.21.0
+    networks:
+      - net
+    environment:
+      - SLACK_URL=${SLACK_URL:-https://hooks.slack.com/services/TOKEN}
+      - SLACK_CHANNEL=${SLACK_CHANNEL:-general}
+      - SLACK_USER=${SLACK_USER:-alertmanager}
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - alertmanager:/alertmanager
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  unsee:
+    image: cloudflare/unsee:v0.9.2
+    networks:
+      - net
+    environment:
+      - "ALERTMANAGER_URIS=default:http://alertmanager:9093"
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  node-exporter:
+    image: prom/node-exporter:v1.0.1
+    networks:
+      - net
+    environment:
+      - NODE_ID={{.Node.ID}}
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /etc/hostname:/etc/nodename
+    command:
+      - '--path.sysfs=/host/sys'
+      - '--path.procfs=/host/proc'
+      - '--collector.textfile.directory=/etc/node-exporter/'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  prometheus:
+    image: prom/prometheus:v2.23.0
+    networks:
+      - net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention=${PROMETHEUS_RETENTION:-24h}'
+    volumes:
+      - prometheus:/prometheus
+    configs:
+      - source: node_rules
+        target: /etc/prometheus/swarm_node.rules.yml
+      - source: task_rules
+        target: /etc/prometheus/swarm_task.rules.yml
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+      - source: prometheus_weave_cortex
+        target: /etc/prometheus/weave_cortex.yml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 128M
+
+  loki:
+    image: grafana/loki:2.0.0
+    networks:
+      - net
+    volumes: 
+      - loki:/loki
+    configs:
+       - source: loki_config
+         target: /etc/loki/local-config.yaml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 128M
+
+  caddy:
+    image: stefanprodan/caddy
+    ports:
+      - "3000:3000"
+      - "3100:3100"
+      - "9090:9090"
+      - "9093:9093"
+      - "9094:9094"
+      - "8086:8086"
+    networks:
+      - net
+    environment:
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+    configs:
+      - source: caddy_config
+        target: /etc/caddy/Caddyfile
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 5s
+      timeout: 1s
+      retries: 5
