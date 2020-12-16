@@ -7,6 +7,12 @@ Grafeus is designed to be easily deployed via CI/CD to different Docker Swarms. 
 - If to be accessed externally via URL, appropriately configured load balancer & Cloudflare routing
 - Docker swarm cluster (can be a 'babyswarm' if needed)
 
+## Editing config files
+For testing, you can simply edit the existing files in ./configs/default. For production environments, I recommend making a copy of the default folder to base your production intent configurations from.
+
+## Adding configuration items such as Dashboards
+If you wish to add an additional configuration item, you will need to firstly create the appropriate file in the configs path. Once your file has been created, you will need to add the appropriate stanzas in docker-compose.yml to add the configuration item, and similarly to the service definition in docker-compose.yml.
+
 ## Deploying a stack manually
 Perhaps for dev/testing, use the following docker compose command:
 Edit the config files as you see fit
