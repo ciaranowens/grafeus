@@ -43,7 +43,7 @@ configs:
   telegraf_config:
     file: ./configs/default/telegraf/conf/telegraf.conf
   influxdb_config:
-    file: ./configs/default/influxdb/influxdb.conf
+    file: ./configs/default/influxdb/conf/influxdb.conf
   
 
 services:
